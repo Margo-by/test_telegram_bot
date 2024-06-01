@@ -22,7 +22,7 @@ bot = Bot(token=API_TOKEN)
 dp = Dispatcher(storage=MemoryStorage())
 
 # Инициализация OpenAI клиента
-client = OpenAI(OPENAI_API_KEY)
+client = openai.ApiClient(OPENAI_API_KEY)
 
 @dp.message(Command("start"))
 async def send_welcome(message: types.Message):
