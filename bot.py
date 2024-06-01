@@ -37,11 +37,8 @@ async def handle_voice(message: types.Message):
     # Скачиваем файл
     await bot.download_file(file_path, "voice.ogg")
 
-    # Преобразование файла в формат, поддерживаемый Whisper API
-    subprocess.run(["ffmpeg", "-y", "-i", "voice.ogg", "voice.wav"])
-
     # Открываем аудиофайл для чтения
-    with open("voice.wav", "rb") as audio_file:
+    with open("voice.ogg", "rb") as audio_file:
         try:
             # Создаем транскрипцию
             transcription = client.audio.transcriptions.create(
