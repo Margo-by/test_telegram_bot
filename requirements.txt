@@ -1,7 +1,4 @@
 aiogram
-aiogram.filters
-aiogram.fsm.storage.memory
-aiogram.types
 asyncio
 dotenv
 logging
