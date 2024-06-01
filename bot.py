@@ -22,7 +22,8 @@ bot = Bot(token=API_TOKEN)
 dp = Dispatcher(storage=MemoryStorage())
 
 # Инициализация OpenAI клиента
-client = openai.ApiClient(OPENAI_API_KEY)
+client = OpenAI()
+
 
 @dp.message(Command("start"))
 async def send_welcome(message: types.Message):
@@ -45,22 +46,7 @@ async def handle_voice(message: types.Message):
                 model="whisper-1",
                 file=audio_file
             )
-            
-            # Получаем ответ от OpenAI Assistant API
-            response = client.chat.create(
-                model="text-davinci-003",
-                messages=[{"role": "user", "content": transcription}],
-                max_tokens=50
-            )
-
-            # Озвучиваем полученный ответ
-            audio_response = client.tts.create(
-                engine="davinci",
-                text=response.choices[0].text
-            )
-            
-            # Отправляем аудио пользователю
-            await message.answer_voice(audio_response)
+            await message.answer(transcription.text)
         except AuthenticationError:
             # Обработка случая, когда запрос не проходит из-за неправильного ключа
             await message.answer("Ошибка: Не авторизован. Пожалуйста, убедитесь, что ваш API ключ OpenAI правильный.")
