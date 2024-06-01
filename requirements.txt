@@ -1,7 +1,3 @@
 aiogram
-asyncio
-dotenv
-logging
+python-dotenv
 openai
-os
-subprocess
