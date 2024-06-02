@@ -1,6 +1,5 @@
 aiofiles
 aiogram
-dotenv
 httpx
 numpy
 openai
