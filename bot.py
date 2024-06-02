@@ -14,14 +14,17 @@ import io
 import soundfile as sf
 import numpy as np
 from aiogram.types.input_file import FSInputFile  # Изменили импорт
+from config import settings  # Импортируем настройки
 
 # Включаем логирование
 logging.basicConfig(level=logging.INFO)
 
 # Загружаем переменные окружения из файла .env
 load_dotenv()
-API_TOKEN = os.getenv('TELEGRAM_TOKEN')
-OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
+
+# Используем настройки из Pydantic
+API_TOKEN = settings.TELEGRAM_TOKEN
+OPENAI_API_KEY = settings.OPENAI_API_KEY
 
 # Инициализация бота и диспетчера
 bot = Bot(token=API_TOKEN)

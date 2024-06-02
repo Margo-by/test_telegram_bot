@@ -1,3 +1,11 @@
+aiofiles
 aiogram
-python-dotenv
+dotenv
+httpx
+numpy
 openai
+pydantic
+pydantic-settings
+python-dotenv
+requests
+soundfile
