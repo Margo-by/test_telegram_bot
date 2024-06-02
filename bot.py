@@ -9,6 +9,11 @@ from aiogram.fsm.storage.memory import MemoryStorage
 from dotenv import load_dotenv
 from openai import OpenAI, AuthenticationError
 import openai
+import requests
+import io
+import soundfile as sf
+import numpy as np
+from aiogram.types.input_file import FSInputFile  # Изменили импорт
 
 # Включаем логирование
 logging.basicConfig(level=logging.INFO)
@@ -25,6 +30,8 @@ dp = Dispatcher(storage=MemoryStorage())
 # Инициализация OpenAI клиента
 client = OpenAI()
 client2 = openai.Client()
+client3 = OpenAI()
+
 # Создание ассистента
 assistant = client2.beta.assistants.create(
     name="Chat Assistant",
@@ -65,7 +72,33 @@ async def get_assistant_response(user_message: str) -> str:
     # Возврат ответа ассистента
     for msg in messages.data:
         if msg.role == 'assistant':
-            return msg.content[0].text.value
+            return await get_tts_response(msg.content[0].text.value)
+
+async def convert_to_ogg_opus(audio_data: bytes) -> bytes:
+    # Преобразование байтов в объект soundfile
+    with io.BytesIO(audio_data) as audio_file:
+        with sf.SoundFile(audio_file) as sound:
+            audio_data = sound.read(dtype='float32')
+            sample_rate = sound.samplerate
+
+    # Преобразование аудио в формат OGG с кодеком Opus
+    with io.BytesIO() as ogg_opus_file:
+        sf.write(ogg_opus_file, audio_data, sample_rate, format='OGG', subtype='OPUS')
+        return ogg_opus_file.getvalue()
+
+async def get_tts_response(text: str) -> bytes:
+    try:
+        response = client.audio.speech.create(
+            model="tts-1",
+            voice="alloy",
+            input=text
+        )
+        audio_data = response.content 
+        ogg_opus_data = await convert_to_ogg_opus(audio_data)
+        return ogg_opus_data
+    except openai.Error as e:
+        logging.error(f"Error during OpenAI request: {e}")
+        return None  # Возвращаем None в случае ошибки
 
 @dp.message(Command("start"))
 async def send_welcome(message: types.Message):
@@ -89,20 +122,36 @@ async def handle_voice(message: types.Message):
                 file=audio_file
             )
             user_message = transcription.text
-            response = await get_assistant_response(user_message)
-            await message.answer(response)
-        except AuthenticationError:
-            # Обработка случая, когда запрос не проходит из-за неправильного ключа
-            await message.answer("Ошибка: Не авторизован. Пожалуйста, убедитесь, что ваш API ключ OpenAI правильный.")
+            response_audio = await get_assistant_response(user_message)
+            
+            if response_audio:
+                # Сохраняем аудиоданные в файл
+                voice_file_path = "response_audio.ogg"
+                with open(voice_file_path, "wb") as audio_file:
+                    audio_file.write(response_audio)
+
+                # Отправляем голосовое сообщение, используя путь к файлу
+                await bot.send_voice(message.chat.id, voice=FSInputFile(voice_file_path))  # Используем FSInputFile
+
+            else:
+                await message.answer("Извините, не удалось получить ответ от OpenAI.")
         except Exception as e:
-            # Обработка других исключений
-            await message.answer(f"Произошла ошибка: {str(e)}")
+            await handle_exception(message, e)
 
 @dp.message(lambda message: message.content_type == ContentType.TEXT)
 async def handle_text(message: types.Message):
     user_message = message.text
-    response = await get_assistant_response(user_message)
-    await message.answer(response)
+    response_audio = await get_assistant_response(user_message)
+    if response_audio:
+        # Сохраняем аудиоданные в файл
+        voice_file_path = "response_audio.ogg"
+        with open(voice_file_path, "wb") as audio_file:
+            audio_file.write(response_audio)
+
+        # Отправляем голосовое сообщение, используя путь к файлу
+        await bot.send_voice(message.chat.id, voice=FSInputFile(voice_file_path))  # Используем FSInputFile
+    else:
+        await message.answer("Извините, не удалось получить ответ от OpenAI.")
 
 async def main():
     # Запускаем диспетчер и бота
