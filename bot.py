@@ -1,26 +1,23 @@
 import os
 import logging
 import asyncio
-import time
+import io
+import uuid
+
 from aiogram import Bot, Dispatcher, types
 from aiogram.filters import Command
 from aiogram.types import ContentType
+from aiogram.types.input_file import FSInputFile
 from aiogram.fsm.storage.memory import MemoryStorage
-from dotenv import load_dotenv
-from openai import OpenAI, AuthenticationError
-import openai
-import requests
-import io
+from openai import AsyncOpenAI
 import soundfile as sf
-import numpy as np
-from aiogram.types.input_file import FSInputFile  # Изменили импорт
-from config import settings  # Импортируем настройки
+
+from config import settings
+
 
 # Включаем логирование
 logging.basicConfig(level=logging.INFO)
 
-# Загружаем переменные окружения из файла .env
-load_dotenv()
 
 # Используем настройки из Pydantic
 API_TOKEN = settings.TELEGRAM_TOKEN
@@ -30,78 +27,95 @@ OPENAI_API_KEY = settings.OPENAI_API_KEY
 bot = Bot(token=API_TOKEN)
 dp = Dispatcher(storage=MemoryStorage())
 
-# Инициализация OpenAI клиента
-client = OpenAI()
-client2 = openai.Client()
-client3 = OpenAI()
+# Инициализация AsyncOpenAI клиента
+client = AsyncOpenAI(api_key=OPENAI_API_KEY)
 
-# Создание ассистента
-assistant = client2.beta.assistants.create(
-    name="Chat Assistant",
-    instructions="You are a chat assistant. You can answer questions and engage in conversation.",
-    model="gpt-4"
-)
 
-# Создание треда (только один раз)
-thread = client.beta.threads.create()
+# Хранение тредов, ассистентов для каждого пользователя
+user_threads = {}
+user_assistants = {}
 
-async def get_assistant_response(user_message: str) -> str:
-    # Добавление сообщения в тред
-    client.beta.threads.messages.create(
-        thread_id=thread.id,
-        role="user",
-        content=user_message
-    )
-    
-    # Запуск ассистента
-    run = client.beta.threads.runs.create(
-        thread_id=thread.id,
-        assistant_id=assistant.id,
-        instructions="Please answer the user's message."
-    )
-    
-    # Ожидание завершения выполнения
-    while True:
-        run_status = client.beta.threads.runs.retrieve(thread_id=thread.id, run_id=run.id)
+
+async def initialize_thread(chat_id):
+    if chat_id not in user_threads:
+        thread = await client.beta.threads.create()
+        user_threads[chat_id] = thread
+    return user_threads[chat_id]
+
+
+async def initialize_assistant(chat_id):
+    if chat_id not in user_assistants:
+        assistant = await client.beta.assistants.create(
+            name="Chat Assistant",
+            instructions="You are a chat assistant. You can answer questions and engage in conversation.",
+            model="gpt-4"
+        )
+        user_assistants[chat_id] = assistant
+    return user_assistants[chat_id]
+
+
+async def on_startup(dp):
+    tasks = [initialize_assistant(chat_id) for chat_id in user_threads.keys()]
+    await asyncio.gather(*tasks)
+
+
+async def get_assistant_response(chat_id: int, user_message: str) -> bytes:
+
+    thread = await initialize_thread(chat_id)
+    assistant = await initialize_assistant(chat_id)
+
+    attempt_limit = 3
+    for attempt in range(attempt_limit):
+        await client.beta.threads.messages.create(
+            thread_id=thread.id,
+            role="user",
+            content=user_message
+        )
+        run = await client.beta.threads.runs.create_and_poll(
+            thread_id=thread.id,
+            assistant_id=assistant.id,
+            instructions="Please answer the user's message."
+        )
+        run_status = await client.beta.threads.runs.retrieve(thread_id=thread.id, run_id=run.id)
         if run_status.status == "completed":
             break
-        elif run_status.status == "failed":
-            return "Run failed: " + run_status.last_error
-        time.sleep(2)  # wait for 2 seconds before checking again
-    
-    # Получение ответов ассистента
-    messages = client.beta.threads.messages.list(thread_id=thread.id)
-    
-    # Возврат ответа ассистента
+        elif attempt == attempt_limit - 1:
+            raise Exception("Failed to create assistant after multiple attempts")
+        await asyncio.sleep(2)
+
+    messages = await client.beta.threads.messages.list(thread_id=thread.id)
+
     for msg in messages.data:
         if msg.role == 'assistant':
-            return await get_tts_response(msg.content[0].text.value)
+            response_text = msg.content[0].text.value
+            return await get_tts_response(response_text)
+
 
 async def convert_to_ogg_opus(audio_data: bytes) -> bytes:
-    # Преобразование байтов в объект soundfile
     with io.BytesIO(audio_data) as audio_file:
         with sf.SoundFile(audio_file) as sound:
             audio_data = sound.read(dtype='float32')
             sample_rate = sound.samplerate
 
-    # Преобразование аудио в формат OGG с кодеком Opus
     with io.BytesIO() as ogg_opus_file:
         sf.write(ogg_opus_file, audio_data, sample_rate, format='OGG', subtype='OPUS')
         return ogg_opus_file.getvalue()
 
+
 async def get_tts_response(text: str) -> bytes:
     try:
-        response = client.audio.speech.create(
+        response = await client.audio.speech.create(
             model="tts-1",
             voice="alloy",
             input=text
         )
-        audio_data = response.content 
+        audio_data = response.content
         ogg_opus_data = await convert_to_ogg_opus(audio_data)
         return ogg_opus_data
     except openai.Error as e:
         logging.error(f"Error during OpenAI request: {e}")
-        return None  # Возвращаем None в случае ошибки
+        return None
+
 
 @dp.message(Command("start"))
 async def send_welcome(message: types.Message):
@@ -109,56 +123,70 @@ async def send_welcome(message: types.Message):
 
 @dp.message(lambda message: message.content_type == ContentType.VOICE)
 async def handle_voice(message: types.Message):
+    chat_id = message.chat.id
     voice = message.voice
     file_info = await bot.get_file(voice.file_id)
     file_path = file_info.file_path
 
-    # Скачиваем файл
-    await bot.download_file(file_path, "voice.ogg")
+    unique_filename = str(uuid.uuid4())+"_voice.ogg"
 
-    # Открываем аудиофайл для чтения
-    with open("voice.ogg", "rb") as audio_file:
-        try:
-            # Создаем транскрипцию
-            transcription = client.audio.transcriptions.create(
+    await bot.download_file(file_path, unique_filename)
+    try:
+        with open(unique_filename, "rb") as audio_file:
+            transcription = await client.audio.transcriptions.create(
                 model="whisper-1",
                 file=audio_file
             )
             user_message = transcription.text
-            response_audio = await get_assistant_response(user_message)
+            response_audio_file = await get_assistant_response(chat_id, user_message)
             
-            if response_audio:
-                # Сохраняем аудиоданные в файл
-                voice_file_path = "response_audio.ogg"
-                with open(voice_file_path, "wb") as audio_file:
-                    audio_file.write(response_audio)
-
-                # Отправляем голосовое сообщение, используя путь к файлу
-                await bot.send_voice(message.chat.id, voice=FSInputFile(voice_file_path))  # Используем FSInputFile
-
+            if response_audio_file:
+                try:
+                    # Сохраняем аудиофайл на диск
+                    response_audio_path = str(uuid.uuid4())+"_response.ogg"
+                    with open(response_audio_path, "wb") as response_file:
+                        response_file.write(response_audio_file)
+                    
+                    # Отправляем голосовое сообщение
+                    await bot.send_voice(message.chat.id, voice=FSInputFile(response_audio_path))
+                    
+                    # Удаляем сохраненный аудиофайл
+                    os.remove(response_audio_path)
+                    
+                except Exception as e:
+                    await handle_exception(message, e)
             else:
                 await message.answer("Извините, не удалось получить ответ от OpenAI.")
-        except Exception as e:
-            await handle_exception(message, e)
+    except Exception as e:
+        await handle_exception(message, e)
+
+    os.remove(unique_filename)
 
 @dp.message(lambda message: message.content_type == ContentType.TEXT)
 async def handle_text(message: types.Message):
+    chat_id = message.chat.id
     user_message = message.text
-    response_audio = await get_assistant_response(user_message)
-    if response_audio:
-        # Сохраняем аудиоданные в файл
-        voice_file_path = "response_audio.ogg"
-        with open(voice_file_path, "wb") as audio_file:
-            audio_file.write(response_audio)
-
-        # Отправляем голосовое сообщение, используя путь к файлу
-        await bot.send_voice(message.chat.id, voice=FSInputFile(voice_file_path))  # Используем FSInputFile
+    response_audio_file = await get_assistant_response(chat_id, user_message)
+    if response_audio_file:
+        try:
+            # Save the audio file to disk
+            response_audio_path = str(uuid.uuid4())+"_response.ogg"
+            with open(response_audio_path, "wb") as response_file:
+                response_file.write(response_audio_file)
+            
+            # Send the voice message
+            await bot.send_voice(message.chat.id, voice=FSInputFile(response_audio_path))
+            
+            # Clean up the saved audio file
+            os.remove(response_audio_path)
+        except Exception as e:
+            await handle_exception(message, e)
     else:
         await message.answer("Извините, не удалось получить ответ от OpenAI.")
 
 async def main():
-    # Запускаем диспетчер и бота
-    await dp.start_polling(bot)
+    await dp.start_polling(bot, on_startup=on_startup)
+
 
 if __name__ == '__main__':
     asyncio.run(main())
