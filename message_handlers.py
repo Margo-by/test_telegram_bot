@@ -1,8 +1,10 @@
-import os
-import uuid
 import logging
+
+from uuid import uuid4
 from aiogram.types.input_file import FSInputFile
-from openai_client import initialize_assistant, initialize_thread, get_assistant_response,transcribe_audio_file
+from os import remove
+
+from openai_client import initialize_assistant, initialize_thread, get_assistant_response, transcribe_audio_file
 from config import settings
 
 # Используем настройки из Pydantic
@@ -23,7 +25,7 @@ async def send_welcome(message, bot, user_threads):
     if response_audio_file:
         try:
             # Save the audio file to disk
-            response_audio_path = str(uuid.uuid4())+"_response.ogg"
+            response_audio_path = str(uuid4())+"_response.ogg"
             with open(response_audio_path, "wb") as response_file:
                 response_file.write(response_audio_file)
 
@@ -31,7 +33,7 @@ async def send_welcome(message, bot, user_threads):
             await bot.send_voice(message.chat.id, voice=FSInputFile(response_audio_path))
 
             # Clean up the saved audio file
-            os.remove(response_audio_path)
+            remove(response_audio_path)
         except Exception as e:
             await handle_exception(message, e)
     else:
@@ -48,7 +50,7 @@ async def handle_text(message, bot, user_threads):
     if response_audio_file:
         try:
             # Save the audio file to disk
-            response_audio_path = str(uuid.uuid4())+"_response.ogg"
+            response_audio_path = str(uuid4())+"_response.ogg"
             with open(response_audio_path, "wb") as response_file:
                 response_file.write(response_audio_file)
 
@@ -56,7 +58,7 @@ async def handle_text(message, bot, user_threads):
             await bot.send_voice(message.chat.id, voice=FSInputFile(response_audio_path))
 
             # Clean up the saved audio file
-            os.remove(response_audio_path)
+            remove(response_audio_path)
         except Exception as e:
             await handle_exception(message, e)
     else:
@@ -68,7 +70,7 @@ async def handle_voice(message, bot, user_threads):
     file_info = await bot.get_file(voice.file_id)
     file_path = file_info.file_path
 
-    unique_filename = str(uuid.uuid4())+"_voice.ogg"
+    unique_filename = str(uuid4())+"_voice.ogg"
 
     await bot.download_file(file_path, unique_filename)
     user_message = await transcribe_audio_file(unique_filename)
@@ -81,7 +83,7 @@ async def handle_voice(message, bot, user_threads):
         if response_audio_file:
             try:
                 # Сохраняем аудиофайл на диск
-                response_audio_path = str(uuid.uuid4())+"_response.ogg"
+                response_audio_path = str(uuid4())+"_response.ogg"
                 with open(response_audio_path, "wb") as response_file:
                     response_file.write(response_audio_file)
 
@@ -89,7 +91,7 @@ async def handle_voice(message, bot, user_threads):
                 await bot.send_voice(message.chat.id, voice=FSInputFile(response_audio_path))
 
                 # Удаляем сохраненный аудиофайл
-                os.remove(response_audio_path)
+                remove(response_audio_path)
 
             except Exception as e:
                 await handle_exception(message, e)
@@ -98,4 +100,4 @@ async def handle_voice(message, bot, user_threads):
     else:
         await message.answer("Sorry, failed to transcribe audio.")
 
-    os.remove(unique_filename)
+    remove(unique_filename)

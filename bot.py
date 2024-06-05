@@ -1,14 +1,13 @@
-import os
 import logging
-import asyncio
-import uuid
+
+from asyncio import run as asyncio_run
 from aiogram import Bot, Dispatcher, types
 from aiogram.filters import Command
 from aiogram.types import ContentType
 from aiogram.types.input_file import FSInputFile
 from aiogram.fsm.storage.memory import MemoryStorage
 
-from openai_client import initialize_assistant, get_assistant_response
+from openai_client import initialize_assistant
 from message_handlers import send_welcome, handle_voice, handle_text
 from config import settings
 
@@ -46,4 +45,4 @@ async def main():
     await dp.start_polling(bot, on_startup=on_startup)
 
 if __name__ == '__main__':
-    asyncio.run(main())
+    asyncio_run(main())
