@@ -1,17 +1,18 @@
 import logging
+import json
+
 from asyncio import sleep as asyncio_sleep
 from openai import AsyncOpenAI, OpenAIError
 
 from config import settings
 from audio_utils import convert_to_ogg_opus
+from database import save_user_value
 
-# Хранение тредов для каждого пользователя
 user_threads = {}
 
 # Глобальные переменные для хранения клиента и ассистента
 client = None
 assistant = None
-
 
 async def initialize_client_assistant():
     global client, assistant
@@ -19,12 +20,164 @@ async def initialize_client_assistant():
         # Инициализация AsyncOpenAI клиента
         client = AsyncOpenAI(api_key=settings.OPENAI_API_KEY)
         assistant = await client.beta.assistants.create(
+
             name="Chat Assistant",
-            instructions="You are a chat assistant. You can answer questions and engage in conversation.",
-            model="gpt-4"
+            instructions = """
+                You are the chat assistant. You can answer questions and participate in the conversation. 
+                Analyze the user messages and try to identify the user's key life values based on your
+                communication. If any values are found, then call the save_value function. Don't forget 
+                to continue your ordinary dialogue with the user after you call save_value function.
+            """,
+            model="gpt-4",
+            tools=[
+                {
+                    "type": "function",
+                    "function": {
+                        "name": "save_value",
+                        "description": "Validate and save the identified key life values",
+                        "parameters": {
+                            "type": "object",
+                            "properties": {
+                                "values": {
+                                    "type": "array",
+                                    "items": {"type": "string"},
+                                    "description": "The list of key life values identified in the user's message"
+                                }
+                            },
+                            "required": ["values"]
+                        }
+                    }
+                }
+            ]
         )
     except OpenAIError as e:
         logging.error(f"Exception occurred: {e}")
+
+async def get_assistant_response(chat_id, user_message: str) -> str:
+    # Создание нового потока, если его нет
+    if chat_id not in user_threads:
+        thread = await client.beta.threads.create()
+        user_threads[chat_id] = thread
+    else:
+        thread = user_threads[chat_id]
+    try:
+        attempt_limit = 3
+        for attempt in range(attempt_limit):
+            await client.beta.threads.messages.create(
+                thread_id=thread.id,
+                role="user",
+                content=user_message
+            )
+            run = await client.beta.threads.runs.create_and_poll(
+                thread_id=thread.id,
+                assistant_id=assistant.id
+            )
+            if run.status == 'requires_action':
+                tool_outputs = []
+                userid_and_values = []
+                for tool in run.required_action.submit_tool_outputs.tool_calls:
+                    value_dict = json.loads(tool.function.arguments)
+                    values = value_dict.get('values', [])
+                    tool_outputs.append({
+                        "tool_call_id": tool.id,
+                        "output": tool.function.arguments
+                    })
+                    #отправятся на валидацию
+                    userid_and_values.append({
+                        "values": values,
+                        "chat_id": chat_id
+                    })
+                if tool_outputs:
+                    try:
+                        run = await client.beta.threads.runs.submit_tool_outputs_and_poll(
+                            thread_id=thread.id,
+                            run_id=run.id,
+                            tool_outputs=tool_outputs
+                        )
+                    except Exception as e:
+                        logging.error("Failed to submit tool outputs:", e)
+                else:
+                    logging.info("No tool outputs to submit.")
+                #проверяем значения на корректность и сохраняем в бд, если корректны
+                await validate_values(userid_and_values)
+            if run.status == "completed":
+                break
+                
+            # Если превышен лимит попыток, генерируем исключение
+            elif attempt == attempt_limit - 1:
+                raise Exception("Failed to create assistant after multiple attempts")
+            await asyncio_sleep(2)
+        messages = await client.beta.threads.messages.list(thread_id=thread.id)
+
+        # Поиск ответа ассистента в сообщениях
+        for msg in messages.data:
+            if msg.role == 'assistant':
+                response_text = msg.content[0].text.value
+                return await get_tts_response(response_text)
+
+    except Exception as e:
+        logging.error(f"Error while getting assistant response: {e}")
+        return None
+
+async def validate_values(userid_and_values):
+    for item in userid_and_values:
+        for value in item['values']:
+            is_valid = await is_life_value(value)
+            if is_valid:
+                logging.info(f"Chat ID: {item['chat_id']}, Value: {value}")
+                #сохраняем в бд корректную жизеннную ценность
+                await save_user_value(user_id=item['chat_id'], value=value)
+            else:
+                logging.info(f"Value '{value}' is not a key life value for user ID {item['chat_id']}")
+    logging.info("Values saved to database")
+
+async def is_life_value(value: str) -> bool:
+    messages=[
+        {"role": "user", "content": f"Is '{value}' a key life value? Answer only true or false."}
+    ]
+    tools = [
+        {
+            "type": "function",
+            "function": {
+                "name": "is_life_value",
+                "description": "Check if the given value is a key life value",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "true_false": {
+                            "type": "string",
+                            "description": """
+                                    Contains only 'true' or 'false' string.                             
+                                    This string represents the answer to the user's question is whether the
+                                    provided value is a valid life value or contains nonsense.
+                                    Contains 'true' means values are defined correctly, do not contain nonsense. 
+                                    Contains 'false' — the value is determined incorrectly or the string is empty.
+                                    The true_false should be returned in plain text, not in JSON.
+                                    """,
+                        }
+                    },
+                    "required": ["true_false"],
+                },
+            }
+        }
+    ]
+    try:
+        response = await client.chat.completions.create(
+            model="gpt-4",
+            messages=messages,
+            tools=tools
+        )
+        tool_calls = response.choices[0].message.tool_calls
+        if tool_calls:
+            for tool_call in tool_calls:
+                if tool_call.function:
+                    function_arguments = json.loads(tool_call.function.arguments)
+                    true_false_value = function_arguments.get('true_false')
+        return true_false_value in ["true"]
+    except Exception as e:
+        logging.error(f"Error while checking if '{value}' is a key life value: {e}")
+        return False
+
 
 async def get_tts_response(text: str) -> bytes:
     try:
@@ -50,40 +203,4 @@ async def transcribe_audio_file(unique_filename):
             return transcription.text
     except OpenAIError as e:
         logging.error(f"Error while transcribe audio file: {e}")
-        return None
-
-async def get_assistant_response(chat_id, user_message: str) -> str:
-    if chat_id not in user_threads:
-        thread = await client.beta.threads.create()
-        user_threads[chat_id] = thread
-    else:
-        thread = user_threads[chat_id]
-    try:
-        attempt_limit = 3
-        for attempt in range(attempt_limit):
-            await client.beta.threads.messages.create(
-                thread_id=thread.id,
-                role="user",
-                content=user_message
-            )
-            run = await client.beta.threads.runs.create_and_poll(
-                thread_id=thread.id,
-                assistant_id=assistant.id,
-                instructions="Please answer the user's message."
-            )
-            if run.status == "completed":
-                break
-            elif attempt == attempt_limit - 1:
-                raise Exception("Failed to create assistant after multiple attempts")
-            await asyncio_sleep(2)
-
-        messages = await client.beta.threads.messages.list(thread_id=thread.id)
-
-        for msg in messages.data:
-            if msg.role == 'assistant':
-                response_text = msg.content[0].text.value
-                return await get_tts_response(response_text)
-
-    except Exception as e:
-        logging.error(f"Error while getting assistant response: {e}")
         return None

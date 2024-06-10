@@ -8,3 +8,7 @@ pydantic-settings
 python-dotenv
 requests
 soundfile
+
+alembic
+sqlalchemy[asyncio]
+asyncpg
