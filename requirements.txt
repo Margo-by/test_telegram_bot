@@ -12,4 +12,3 @@ soundfile
 alembic
 sqlalchemy[asyncio]
 asyncpg
-psycopg2
