@@ -1,9 +1,9 @@
 import logging
+import asyncpg
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
 from sqlalchemy.orm import sessionmaker
-from sqlalchemy.exc import IntegrityError
 
 from models import UserValue
 from config import settings
@@ -20,14 +20,19 @@ async def get_db():
 async def save_user_value(user_id: int, value: str):
     async with AsyncSessionLocal() as session:
         async with session.begin():
-            # Удаляем все записи с аналогичным значением value для данного user_id
-            await session.execute(
-                UserValue.__table__.delete().where(UserValue.user_id == user_id, UserValue.value == value)
-            )
-            logging.info(f"Удалены все записи для user_id: {user_id} с значением: {value}.")
+            try:
+                # Удаляем все записи с аналогичным значением value для данного user_id
+                await session.execute(
+                    UserValue.__table__.delete().where(UserValue.user_id == user_id, UserValue.value == value)
+                )
+                logging.info(f"Удалены все записи для user_id: {user_id} с значением: {value}.")
 
-            # Добавляем новое значение пользователя
-            new_user_value = UserValue(user_id=user_id, value=value)
-            session.add(new_user_value)
-            await session.commit()
-            logging.info(f"Значение {value} сохранено для user_id: {user_id}.")
+                # Добавляем новое значение пользователя
+                new_user_value = UserValue(user_id=user_id, value=value)
+                session.add(new_user_value)
+                await session.commit()
+                logging.info(f"Значение {value} сохранено для user_id: {user_id}.")
+            except Exception as e:
+                logging.error(f"Ошибка при сохранении значения для user_id: {user_id}. Ошибка: {e}")
+                await session.rollback()
+                raise

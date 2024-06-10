@@ -1,5 +1,6 @@
 import asyncio
 import logging
+import asyncpg
 
 from sqlalchemy.ext.asyncio import create_async_engine
 

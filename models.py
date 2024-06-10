@@ -1,6 +1,5 @@
-from sqlalchemy import Column, Integer, String, DateTime
-from sqlalchemy.sql import func
-from sqlalchemy.orm import relationship, declarative_base
+from sqlalchemy import Column, Integer, String, Date
+from sqlalchemy.orm import declarative_base
 from datetime import datetime
 
 Base = declarative_base()
@@ -11,4 +10,4 @@ class UserValue(Base):
     id = Column(Integer, primary_key=True, index=True)
     user_id = Column(Integer, nullable=False)
     value = Column(String(255), nullable=False)
-    created_at = Column(DateTime, server_default=func.now())
+    created_date = Column(Date, nullable=False, default=datetime.utcnow().date())
