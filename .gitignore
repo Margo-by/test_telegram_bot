@@ -1,2 +1,5 @@
-# Ignore .env file
+# Ignore 
 .env
+alembic/versions/__pycache__/
+__pycache__/
+alembic/__pycache__/
