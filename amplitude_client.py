@@ -2,7 +2,7 @@
 import threading
 import logging
 
-from amplitude import Amplitude, BaseEvent
+from amplitude.client import Amplitude, BaseEvent
 from concurrent.futures import ThreadPoolExecutor
 from functools import wraps
 
