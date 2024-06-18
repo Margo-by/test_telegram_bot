@@ -9,8 +9,10 @@ from aiogram.types import ContentType
 from aiogram.types.input_file import FSInputFile
 from aiogram.fsm.storage.memory import MemoryStorage
 
-from openai_client import get_assistant_response, transcribe_audio_file, initialize_client_assistant
+from openai_client import get_assistant_response, transcribe_audio_file, initialize_client_assistant, get_mood, get_tts_response
 from config import settings
+from amplitude_client import track_user_event
+
 
 
 # Включаем логирование
@@ -29,9 +31,8 @@ async def handle_exception(message, exception):
     await message.answer("Sorry, an error occurred. Please try again later.")
 
 
-async def send_bot_voice_response(message, user_message_text):
 
-    response_audio_file = await get_assistant_response(message.chat.id, user_message_text)
+async def send_bot_voice_response(message, response_audio_file):
     if (response_audio_file):
         try:
             # Save the audio file to disk
@@ -47,14 +48,40 @@ async def send_bot_voice_response(message, user_message_text):
         except Exception as e:
             await handle_exception(message, e)
 
+
+@dp.message(lambda message: message.content_type == ContentType.PHOTO)
+async def handle_photo_message(message: types.Message):
+
+    photo = message.photo[-1]
+    file_info = await bot.get_file(photo.file_id)
+    file_path = file_info.file_path    
+    file_extension = file_path.split('.')[-1]
+
+    unique_filename = f"{uuid4()}.{file_extension}"
+    await bot.download_file(file_path, unique_filename)  
+    #делаем запрос в gpt-4o 
+    mood = await get_mood(unique_filename) 
+    if(mood):
+        try:
+            response_audio_file=await get_tts_response(mood)
+            await send_bot_voice_response(message, response_audio_file)
+            track_user_event('send_photo', message.from_user.id, {'mood': mood})
+        except Exception as e:
+            await handle_exception(message, e)
+    remove(unique_filename)
+
 @dp.message(Command("start"))
 async def send_welcome_message(message: types.Message):
     user_message_text = "Say hello to me and describe what you can do"
-    await send_bot_voice_response(message,user_message_text)
+    response_audio_file= await get_assistant_response(message.chat.id, user_message_text)
+    await send_bot_voice_response(message, response_audio_file)
+    track_user_event('user_started', message.from_user.id, {'command': 'start'})
 
 @dp.message(lambda message: message.content_type == ContentType.TEXT)
 async def handle_text_message(message: types.Message):
-    await send_bot_voice_response(message, message.text)
+    response_audio_file=await get_assistant_response(message.chat.id, message.text)
+    await send_bot_voice_response(message, response_audio_file)
+    track_user_event('send_text', message.from_user.id, {'text': message.text})
 
 @dp.message(lambda message: message.content_type == ContentType.VOICE)
 async def handle_voice_message(message: types.Message):
@@ -65,8 +92,9 @@ async def handle_voice_message(message: types.Message):
     await bot.download_file(file_path, unique_filename)
 
     user_message_text = await transcribe_audio_file(unique_filename)
-
-    await send_bot_voice_response(message, user_message_text)
+    response_audio_file=await get_assistant_response(message.chat.id, user_message_text)
+    await send_bot_voice_response(message, response_audio_file)
+    track_user_event('send_voice', message.from_user.id, {'transcription': user_message_text})
     remove(unique_filename)
 
 

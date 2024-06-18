@@ -1,7 +1,5 @@
 import logging
-import asyncpg
 
-from sqlalchemy import select
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
 from sqlalchemy.orm import sessionmaker
 

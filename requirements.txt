@@ -12,3 +12,6 @@ soundfile
 alembic
 sqlalchemy[asyncio]
 asyncpg
+
+amplitude-analytics
+amplitude-python

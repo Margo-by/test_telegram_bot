@@ -5,7 +5,7 @@ from asyncio import sleep as asyncio_sleep
 from openai import AsyncOpenAI, OpenAIError
 
 from config import settings
-from audio_utils import convert_to_ogg_opus
+from some_utils import convert_to_ogg_opus, encode_image
 from database import save_user_value
 
 user_threads = {}
@@ -52,6 +52,75 @@ async def initialize_client_assistant():
         )
     except OpenAIError as e:
         logging.error(f"Exception occurred: {e}")
+
+
+
+async def get_mood(file_path):
+    # Getting the base64 string
+    base64_image = await encode_image(file_path)
+
+
+    payload = {
+    "model": "gpt-4o",
+    "messages": [
+        {
+        "role": "user",
+        "content": [
+            {
+            "type": "text",
+            "text": "determine the mood from the photo, return only the type of mood in a few words without explanatory comments"
+            },
+            {
+            "type": "image_url",
+            "image_url": {
+                "url": f"data:image/jpeg;base64,{base64_image}"
+            }
+            }
+        ]
+        }
+    ],
+    "max_tokens": 300
+    }
+    response = await client.chat.completions.create(
+    model="gpt-4o",
+    messages=[
+        {
+        "role": "user",
+        "content": [
+            {
+            "type": "text",
+            "text": "determine the mood from the photo, return only the type of mood in a few words without explanatory comments"
+            },
+            {
+            "type": "image_url",
+            "image_url": {
+                "url": f"data:image/jpeg;base64,{base64_image}"
+            }
+            }
+        ]
+        }
+    ],
+    max_tokens=300,
+    )
+
+
+
+    # Извлечение значения "content"
+    content = response.choices[0].message.content
+
+    return str(content)
+    #print(response.choices)
+    #return str(response.choices)
+    #response = await client.post("https://api.openai.com/v1/chat/completions", json=payload)
+
+    # Парсинг JSON строки в словарь
+    #data = response.json()
+
+    # Извлечение значения "content"
+    #content = data['choices'][0]['message']['content']
+
+    #return str(content)
+    #return str(response.choices[0])
 
 async def get_assistant_response(chat_id, user_message: str) -> str:
     # Создание нового потока, если его нет
@@ -204,3 +273,6 @@ async def transcribe_audio_file(unique_filename):
     except OpenAIError as e:
         logging.error(f"Error while transcribe audio file: {e}")
         return None
+    
+
+
