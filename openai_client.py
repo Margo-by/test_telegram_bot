@@ -20,7 +20,6 @@ async def initialize_client_assistant():
         # Инициализация AsyncOpenAI клиента
         client = AsyncOpenAI(api_key=settings.OPENAI_API_KEY)
         assistant = await client.beta.assistants.create(
-
             name="Chat Assistant",
             instructions = """
                 You are the chat assistant. You can answer questions and participate in the conversation. 
@@ -28,7 +27,7 @@ async def initialize_client_assistant():
                 communication. If any values are found, then call the save_value function. Don't forget 
                 to continue your ordinary dialogue with the user after you call save_value function.
             """,
-            model="gpt-4",
+            model="gpt-4o",
             tools=[
                 {
                     "type": "function",
@@ -50,6 +49,43 @@ async def initialize_client_assistant():
                 }
             ]
         )
+
+        # Create a vector store 
+        vector_store = await client.beta.vector_stores.create(name="anxiety")
+        # Ready the files for upload
+        file_paths = ["anxiety.docx"]
+        file_streams = [open(path, "rb") for path in file_paths]
+
+        # Use the upload and poll SDK helper to upload the files, add them to the vector store,
+        # and poll the status of the file batch for completion.
+        file_batch = await client.beta.vector_stores.file_batches.upload_and_poll(
+        vector_store_id=vector_store.id, files=file_streams
+        )
+
+        # You can print the status and the file counts of the batch to see the result of this operation.
+        #print(file_batch.status)
+        #print(file_batch.file_counts)
+        assistant_details = await client.beta.assistants.retrieve(assistant.id)
+        current_instructions = assistant_details.instructions
+        additional_instructions= """
+            if the user asks a question about anxiety, then use the file_search
+            function to find the answer, when sending the answer to the user,
+            always add the file name after the quoted text
+        """
+        updated_instructions = f"{current_instructions}\n\n{additional_instructions}"
+        current_tools = assistant_details.tools
+        new_tools = [
+            {
+                "type": "file_search",
+            }
+        ]        
+        updated_tools = current_tools + new_tools
+        assistant = await client.beta.assistants.update(
+            assistant_id=assistant.id,
+            tools=updated_tools,
+            tool_resources={"file_search": {"vector_store_ids": [vector_store.id]}},
+            instructions=updated_instructions,
+        )
     except OpenAIError as e:
         logging.error(f"Exception occurred: {e}")
 
@@ -58,69 +94,34 @@ async def initialize_client_assistant():
 async def get_mood(file_path):
     # Getting the base64 string
     base64_image = await encode_image(file_path)
-
-
-    payload = {
-    "model": "gpt-4o",
-    "messages": [
-        {
-        "role": "user",
-        "content": [
+    try:
+        response = await client.chat.completions.create(
+        model="gpt-4o",
+        messages=[
             {
-            "type": "text",
-            "text": "determine the mood from the photo, return only the type of mood in a few words without explanatory comments"
-            },
-            {
-            "type": "image_url",
-            "image_url": {
-                "url": f"data:image/jpeg;base64,{base64_image}"
+            "role": "user",
+            "content": [
+                {
+                "type": "text",
+                "text": "determine the mood from the photo, return only the type of mood in a few words without explanatory comments"
+                },
+                {
+                "type": "image_url",
+                "image_url": {
+                    "url": f"data:image/jpeg;base64,{base64_image}"
+                }
+                }
+            ]
             }
-            }
-        ]
-        }
-    ],
-    "max_tokens": 300
-    }
-    response = await client.chat.completions.create(
-    model="gpt-4o",
-    messages=[
-        {
-        "role": "user",
-        "content": [
-            {
-            "type": "text",
-            "text": "determine the mood from the photo, return only the type of mood in a few words without explanatory comments"
-            },
-            {
-            "type": "image_url",
-            "image_url": {
-                "url": f"data:image/jpeg;base64,{base64_image}"
-            }
-            }
-        ]
-        }
-    ],
-    max_tokens=300,
-    )
+        ],
+        max_tokens=300,
+        )
 
-
-
-    # Извлечение значения "content"
-    content = response.choices[0].message.content
-
-    return str(content)
-    #print(response.choices)
-    #return str(response.choices)
-    #response = await client.post("https://api.openai.com/v1/chat/completions", json=payload)
-
-    # Парсинг JSON строки в словарь
-    #data = response.json()
-
-    # Извлечение значения "content"
-    #content = data['choices'][0]['message']['content']
-
-    #return str(content)
-    #return str(response.choices[0])
+        content = response.choices[0].message.content
+        return str(content)
+    except Exception as e:
+        logging.error("Failed to get mood:", e)
+        return None
 
 async def get_assistant_response(chat_id, user_message: str) -> str:
     # Создание нового потока, если его нет
