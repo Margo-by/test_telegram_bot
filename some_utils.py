@@ -3,6 +3,10 @@ import base64
 from io import BytesIO
 from soundfile import SoundFile, write
 
+import os
+
+from urllib.parse import urlparse
+
 async def convert_to_ogg_opus(audio_data: bytes) -> bytes:
     with BytesIO(audio_data) as audio_file:
         with SoundFile(audio_file) as sound:
@@ -18,3 +22,12 @@ async def convert_to_ogg_opus(audio_data: bytes) -> bytes:
 async def encode_image(image_path):
     with open(image_path, "rb") as image_file:
         return base64.b64encode(image_file.read()).decode('utf-8')
+
+
+async def parse_url(url):
+    """
+    Парсинг URL для получения host, port и password
+    """
+    parsed_url = await urlparse(url)
+    return parsed_url
+

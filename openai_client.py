@@ -3,16 +3,19 @@ import json
 
 from asyncio import sleep as asyncio_sleep
 from openai import AsyncOpenAI, OpenAIError
+from aiogram.fsm.context import FSMContext
+from aiogram.filters.state import State, StatesGroup
 
 from config import settings
 from some_utils import convert_to_ogg_opus, encode_image
 from database import save_user_value
 
-user_threads = {}
-
 # Глобальные переменные для хранения клиента и ассистента
 client = None
 assistant = None
+
+class ThreadId(StatesGroup):
+    id = State()
 
 async def initialize_client_assistant():
     global client, assistant
@@ -122,24 +125,31 @@ async def get_mood(file_path):
     except Exception as e:
         logging.error("Failed to get mood:", e)
         return None
-
-async def get_assistant_response(chat_id, user_message: str) -> str:
-    # Создание нового потока, если его нет
-    if chat_id not in user_threads:
-        thread = await client.beta.threads.create()
-        user_threads[chat_id] = thread
-    else:
-        thread = user_threads[chat_id]
+    
+async def get_assistant_response(chat_id, user_message: str, state: FSMContext) -> str:
+    # Получаем текущее состояние пользователя
+    data = await state.get_data()    
+    # Получаем значение поля 'id' из данных состояния
+    thread_id = data.get('id')
+    # Если нет thread_id в состоянии, создаем новый поток
+    if not thread_id:
+        try:
+            thread = await client.beta.threads.create()
+            thread_id = thread.id
+            await state.update_data(id=thread_id)
+        except Exception as e:
+            logging.error(f"Failed to create thread for chat_id {chat_id}: {e}")
+            return None
     try:
         attempt_limit = 3
         for attempt in range(attempt_limit):
             await client.beta.threads.messages.create(
-                thread_id=thread.id,
+                thread_id=thread_id,
                 role="user",
                 content=user_message
             )
             run = await client.beta.threads.runs.create_and_poll(
-                thread_id=thread.id,
+                thread_id=thread_id,
                 assistant_id=assistant.id
             )
             if run.status == 'requires_action':
@@ -160,7 +170,7 @@ async def get_assistant_response(chat_id, user_message: str) -> str:
                 if tool_outputs:
                     try:
                         run = await client.beta.threads.runs.submit_tool_outputs_and_poll(
-                            thread_id=thread.id,
+                            thread_id=thread_id,
                             run_id=run.id,
                             tool_outputs=tool_outputs
                         )
@@ -177,7 +187,7 @@ async def get_assistant_response(chat_id, user_message: str) -> str:
             elif attempt == attempt_limit - 1:
                 raise Exception("Failed to create assistant after multiple attempts")
             await asyncio_sleep(2)
-        messages = await client.beta.threads.messages.list(thread_id=thread.id)
+        messages = await client.beta.threads.messages.list(thread_id=thread_id)
 
         # Поиск ответа ассистента в сообщениях
         for msg in messages.data:
