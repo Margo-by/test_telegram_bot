@@ -53,7 +53,6 @@ async def initialize_client_assistant():
             ]
         )
 
-        # Create a vector store 
         vector_store = await client.beta.vector_stores.create(name="anxiety")
         # Ready the files for upload
         file_paths = ["anxiety.docx"]
@@ -64,16 +63,12 @@ async def initialize_client_assistant():
         file_batch = await client.beta.vector_stores.file_batches.upload_and_poll(
         vector_store_id=vector_store.id, files=file_streams
         )
-
-        # You can print the status and the file counts of the batch to see the result of this operation.
-        #print(file_batch.status)
-        #print(file_batch.file_counts)
         assistant_details = await client.beta.assistants.retrieve(assistant.id)
         current_instructions = assistant_details.instructions
         additional_instructions= """
             if the user asks a question about anxiety, then use the file_search
             function to find the answer, when sending the answer to the user,
-            always add the file name after the quoted text
+            always add the specific full file name after the quoted text
         """
         updated_instructions = f"{current_instructions}\n\n{additional_instructions}"
         current_tools = assistant_details.tools
