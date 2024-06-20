@@ -7,32 +7,23 @@ from aiogram import Bot, Dispatcher, types
 from aiogram.filters import Command
 from aiogram.types import ContentType
 from aiogram.types.input_file import FSInputFile
+from aiogram.fsm.storage.redis  import RedisStorage 
+from aiogram.fsm.context import FSMContext
+from redis.asyncio import Redis
+from urllib.parse import urlparse
 
 from openai_client import get_assistant_response, transcribe_audio_file, initialize_client_assistant, get_mood, get_tts_response
 from config import settings
 from amplitude_client import track_user_event
-#from aioredis import Redis
-#from redis.client import Redis
 
-from aiogram.fsm.storage.redis  import RedisStorage  #вызывает проблемы
-from aiogram.fsm.context import FSMContext
-'''
- File "D:\trainee\myenv\Lib\site-packages\aiogram\fsm\storage\redis.py", line 5, in <module>
-    from redis.asyncio.client import Redis
-ModuleNotFoundError: No module named 'redis'
-'''
-from redis.asyncio import Redis, ConnectionPool
-from urllib.parse import urlparse
 # Включаем логирование
 logging.basicConfig(level=logging.INFO)
 
 # Используем настройки из Pydantic
 API_TOKEN = settings.TELEGRAM_TOKEN
 
-# Разбор URL
 parsed_url = urlparse(settings.REDIS_URL)
 r_client = Redis(host=parsed_url.hostname, port=parsed_url.port,password=parsed_url.password)
-#await r_client.aclose()
 
 # Инициализация хранилища RedisStorage
 storage = RedisStorage(r_client)
@@ -116,7 +107,7 @@ async def handle_voice_message(message: types.Message, state: FSMContext):
 
 
 async def main():
-    print(f"Ping successful: {await r_client.ping()}")
+    #print(f"Ping successful: {await r_client.ping()}")
     await initialize_client_assistant()  
     await dp.start_polling(bot)
 
