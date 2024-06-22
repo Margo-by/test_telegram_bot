@@ -7,6 +7,7 @@ class Settings(BaseSettings):
     AMPLITUDE_API_KEY: str
     REDIS_URL: str
     REDIS_PORT: int
+    ASSISTANT_ID: str
     
     class Config:
         env_file = '.env'

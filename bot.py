@@ -12,32 +12,24 @@ from aiogram.fsm.context import FSMContext
 from redis.asyncio import Redis
 from urllib.parse import urlparse
 
-from openai_client import get_assistant_response, transcribe_audio_file, initialize_client_assistant, get_mood, get_tts_response
+from openai_client import get_assistant_response, transcribe_audio_file, get_mood, get_tts_response
 from config import settings
 from amplitude_client import track_user_event
 
 # Включаем логирование
 logging.basicConfig(level=logging.INFO)
 
-# Используем настройки из Pydantic
 API_TOKEN = settings.TELEGRAM_TOKEN
 
 parsed_url = urlparse(settings.REDIS_URL)
 r_client = Redis(host=parsed_url.hostname, port=parsed_url.port,password=parsed_url.password)
-
-# Инициализация хранилища RedisStorage
 storage = RedisStorage(r_client)
-
-# Инициализация бота и диспетчера
 bot = Bot(API_TOKEN)
 dp = Dispatcher(storage=storage)
-
 
 async def handle_exception(message, exception):
     logging.error(f"Exception occurred: {exception}")
     await message.answer("Sorry, an error occurred. Please try again later.")
-
-
 
 async def send_bot_voice_response(message, response_audio_file):
     if (response_audio_file):
@@ -87,7 +79,7 @@ async def send_welcome_message(message: types.Message, state: FSMContext):
 
 @dp.message(lambda message: message.content_type == ContentType.TEXT)
 async def handle_text_message(message: types.Message, state: FSMContext):
-    response_audio_file=await get_assistant_response(message.chat.id, message.text,state)
+    response_audio_file=await get_assistant_response(message.chat.id, message.text,state)   
     await send_bot_voice_response(message, response_audio_file)
     track_user_event('send_text', message.from_user.id, {'text': message.text})
 
@@ -107,9 +99,8 @@ async def handle_voice_message(message: types.Message, state: FSMContext):
 
 
 async def main():
-    #print(f"Ping successful: {await r_client.ping()}")
-    await initialize_client_assistant()  
     await dp.start_polling(bot)
+    
 
 if __name__ == '__main__':
     asyncio_run(main())

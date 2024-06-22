@@ -1,22 +1,26 @@
 import base64
+import logging
 
 from io import BytesIO
 from soundfile import SoundFile, write
 
-import os
-
 async def convert_to_ogg_opus(audio_data: bytes) -> bytes:
-    with BytesIO(audio_data) as audio_file:
-        with SoundFile(audio_file) as sound:
-            audio_data = sound.read(dtype='float32')
-            sample_rate = sound.samplerate
+    try:
+        with BytesIO(audio_data) as audio_file:
+            with SoundFile(audio_file) as sound:
+                audio_data = sound.read(dtype='float32')
+                sample_rate = sound.samplerate
 
-    with BytesIO() as ogg_opus_file:
-        write(ogg_opus_file, audio_data, sample_rate, format='OGG', subtype='OPUS')
-        return ogg_opus_file.getvalue()
+        with BytesIO() as ogg_opus_file:
+            write(ogg_opus_file, audio_data, sample_rate, format='OGG', subtype='OPUS')
+            return ogg_opus_file.getvalue()
+    except Exception as e:
+        logging.error(f"Exception occurred: {e}")
 
-
-# Function to encode the image
 async def encode_image(image_path):
-    with open(image_path, "rb") as image_file:
-        return base64.b64encode(image_file.read()).decode('utf-8')
+    try:
+        with open(image_path, "rb") as image_file:
+            return base64.b64encode(image_file.read()).decode('utf-8')
+    except Exception as e:
+        logging.error(f"Exception occurred: {e}")
+
