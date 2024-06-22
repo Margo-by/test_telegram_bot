@@ -1,7 +1,6 @@
 import logging
 from openai import AsyncOpenAI
 from config import settings
-from some_utils import CustomFileHandler
 
 async def initialize_assistant()-> str:
     try:
@@ -36,7 +35,6 @@ async def initialize_assistant()-> str:
                 }
             ]
         )
-        print(assistant.id)
         return assistant.id
     except Exception as e:
         logging.error(f"Exception occurred: {e}")
@@ -45,17 +43,14 @@ async def initialize_assistant()-> str:
 
 async def update_assistant(id=settings.OPENAI_API_KEY):
     try:
-        # Инициализация AsyncOpenAI клиента
         client = AsyncOpenAI(api_key=settings.OPENAI_API_KEY)
 
         vector_store = await client.beta.vector_stores.create(name="anxiety")
-        # Ready the files for upload
+
         file_paths = ["anxiety.docx"]
         
         file_streams = [open(path, "rb") for path in file_paths]
 
-        # Use the upload and poll SDK helper to upload the files, add them to the vector store,
-        # and poll the status of the file batch for completion.
         await client.beta.vector_stores.file_batches.upload_and_poll(
         vector_store_id=vector_store.id, files=file_streams
         )
