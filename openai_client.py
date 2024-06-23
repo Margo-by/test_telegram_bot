@@ -46,15 +46,14 @@ async def get_mood(file_path):
     
 async def get_assistant_response(chat_id, user_message: str, state: FSMContext) -> str:
     # Получаем текущее состояние пользователя
-    data = await state.get_data()    
-    thread_id = data.get('id')
-
+    data = await state.get_data()
+    thread_id = data.get(str(chat_id))
     # Если нет thread_id в состоянии, создаем новый поток
     if not thread_id:
         try:
             thread = await client.beta.threads.create()
             thread_id = thread.id
-            await state.update_data(id=thread_id)
+            await state.update_data({str(chat_id): str(thread_id)})
         except Exception as e:
             logging.error(f"Failed to create thread for chat_id {chat_id}: {e}")
             return None
@@ -64,11 +63,12 @@ async def get_assistant_response(chat_id, user_message: str, state: FSMContext) 
             await client.beta.threads.messages.create(
                 thread_id=thread_id,
                 role="user",
-                content=user_message
+                content=user_message, 
             )
             run = await client.beta.threads.runs.create_and_poll(
                 thread_id=thread_id,
-                assistant_id=ASSISTANT_ID
+                assistant_id=ASSISTANT_ID,
+                tool_choice="required"
             )
             if run.status == 'requires_action':
                 tool_outputs = []
@@ -106,7 +106,6 @@ async def get_assistant_response(chat_id, user_message: str, state: FSMContext) 
             await asyncio_sleep(2)
 
         messages = await client.beta.threads.messages.list(thread_id=thread_id)
-        
         # Поиск ответа ассистента в сообщениях
         for msg in messages.data:
             if msg.role == 'assistant':
@@ -117,7 +116,10 @@ async def get_assistant_response(chat_id, user_message: str, state: FSMContext) 
                 for index, annotation in enumerate(annotations):
                     if file_citation := getattr(annotation, "file_citation", None):
                         cited_file = await client.files.retrieve(file_citation.file_id) 
+                        print(annotation.text)
                         response_text = response_text.replace(annotation.text, cited_file.filename)
+                        if not cited_file.filename in response_text:
+                            response_text += cited_file.filename
                 return await get_tts_response(response_text)
     except Exception as e:
         logging.error(f"Error while getting assistant response: {e}")

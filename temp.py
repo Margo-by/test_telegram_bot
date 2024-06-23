@@ -1,6 +1,7 @@
 import logging
 from openai import AsyncOpenAI
 from config import settings
+from asyncio import run as asyncio_run
 
 async def initialize_assistant()-> str:
     try:
@@ -61,7 +62,8 @@ async def update_assistant(id=settings.OPENAI_API_KEY):
 
         current_instructions = assistant_details.instructions
         additional_instructions="""
-            always try to use the file_search to find the answer to the user's question
+            Always look for information using the `file_search` tool before giving an answer. 
+            If `file_search` does not return relevant information, proceed with your own knowledge.
         """
         updated_instructions = f"{current_instructions}\n\n{additional_instructions}"
         
@@ -72,7 +74,7 @@ async def update_assistant(id=settings.OPENAI_API_KEY):
         await client.beta.assistants.update(
             assistant_id=id,
             tools=updated_tools,
-            tool_resources={"file_search": {"vector_store_ids": [vector_store.id]}},
+            tool_resources={"file_search": {"vector_store_ids": [vector_store.id],}},
             instructions=updated_instructions,
         )
     except Exception as e:
